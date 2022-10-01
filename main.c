@@ -29,6 +29,15 @@ static int opt_enlarge = 0;
 static int opt_ignore_aspect = 0;
 static int opt_orientation = 0;
 static int opt_skip_tty = 0;
+static int opt_color_remap = 0;
+static float opt_color_points[12];
+static float color_bezier_points[12] = {
+	0.0, 1.0/3.0, 2.0/3.0, 1.0,
+	0.0, 1.0/3.0, 2.0/3.0, 1.0,
+	0.0, 1.0/3.0, 2.0/3.0, 1.0
+};
+static unsigned char color_map[3 * 256];
+
 static char *imagename = NULL;
 
 static char inline_status[] =
@@ -358,19 +367,24 @@ identified:
 			i.alpha = alpha;
 			i.do_free = 0;
 
-			if(transform_rotation)
+			if(transform_rotation) {
 				do_rotate(&i, transform_rotation);
+			}
 
-			if(zoom > 1)
+			if(zoom > 1) {
 				do_fit_to_screen(&i, x_size / zoom, y_size / zoom, 0, 0, 0, 0);
-			if(zoom < 1)
+			}
+			if(zoom < 1) {
 				do_enlarge(&i, x_size / zoom, y_size / zoom, 0, 0, 0);
+			}
 
-			if(transform_shrink)
+			if(transform_shrink) {
 				do_fit_to_screen(&i, screen_width, screen_height, transform_iaspect, transform_widthonly, transform_heightonly, transform_cal);
+			}
 
-			if(transform_enlarge)
+			if(transform_enlarge) {
 				do_enlarge(&i, screen_width, screen_height, transform_iaspect, transform_widthonly, transform_heightonly);
+			}
 
 			x_pan = y_pan = 0;
 			if (opt_smartfit>=0)
@@ -383,6 +397,16 @@ identified:
 				if (i.height>screen_height)
 				{
 					y_pan = (i.height-screen_height)/2;
+				}
+			}
+
+			if (opt_color_remap) {
+				unsigned char *px = i.rgb;
+				for (int cnt=0; cnt<i.width * i.height; cnt++) {
+					*px     = color_map[*px];
+					*(px+1) = color_map[256 + *(px+1)];
+					*(px+2) = color_map[512 + *(px+2)];
+					px += 3;
 				}
 			}
 
@@ -600,6 +624,43 @@ error:
 	return ret;
 }
 
+
+void build_colormap() {
+	// bezier spline calculation
+	float r0 = color_bezier_points[0];
+	float r1 = color_bezier_points[1];
+	float r2 = color_bezier_points[2];
+	float r3 = color_bezier_points[3];
+	float g0 = color_bezier_points[4];
+	float g1 = color_bezier_points[5];
+	float g2 = color_bezier_points[6];
+	float g3 = color_bezier_points[7];
+	float b0 = color_bezier_points[8];
+	float b1 = color_bezier_points[9];
+	float b2 = color_bezier_points[10];
+	float b3 = color_bezier_points[11];
+	for (int x = 0; x<256; x++) {
+		float t = x / 255.0;
+		float t1 = 1.0-t;
+		float t2 = t*t;
+		float t3 = t2 * t;
+		float t12 = t1*t1;
+		float t13 = t12*t;
+		float r = (t13*r0+t12*t*r1+t1*t2*r2+t3*r3)*255.0;
+		float g = (t13*g0+t12*t*g1+t1*t2*g2+t3*g3)*255.0;
+		float b = (t13*b0+t12*t*b1+t1*t2*b2+t3*b3)*255.0;	
+		if (r < 0.0)   r = 0.0;
+		if (r > 255.0) r = 255.0;
+		if (g < 0.0)   g = 0.0;
+		if (g > 255.0) g = 255.0;
+		if (b < 0.0)   b = 0.0;
+		if (b > 255.0) b = 255.0;
+		color_map[x]       = (unsigned char) r;
+		color_map[x + 256] = (unsigned char) g;
+		color_map[x + 512] = (unsigned char) b;
+	}
+}
+
 void help(char *name)
 {
 	printf("Usage: %s [options] image1 image2 image3 ...\n\n"
@@ -620,6 +681,7 @@ void help(char *name)
 		   "  -n imagename(s)     Image name(s) shown in help\n"
 		   "  -o <mode>, --orientation <mode>  Show image in specific orientation (0 = no rotation, 1 = 90° rotation, 2 = 180° rotation, 3 = 270° rotation)\n"
 		   "  -y, --skiptty		  Shows the image only once and skips tty input mode.\n"
+		   "  -m, --color <correct>   Specify 1, 3, 4, 6 or 12 color correction points.\n"
 		   "Input keys:\n"
 		   " r          : Redraw the image\n"
 		   " < or ,     : Previous image\n"
@@ -671,11 +733,14 @@ int main(int argc, char **argv)
 		{"orientation",		  required_argument,  0, 'o'},
 		{"skiptty",		  required_argument,  0, 'y'},
 		{"imagename",     required_argument, 0, 'n'},
+		{"color",         required_argument, 0, 'm'},
 		{0, 0, 0, 0}
 	};
-	int c, i;
+	int c, i, j;
 	char *nameopts = NULL;
 	char **namestarts = NULL;
+	char *pch;
+	float slope;
 
 	if(argc < 2)
 	{
@@ -684,7 +749,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	while((c = getopt_long_only(argc, argv, "hn:cauifks:eltxro:y", long_options, NULL)) != EOF)
+	while((c = getopt_long_only(argc, argv, "hn:cauifks:eltxro:ym:", long_options, NULL)) != EOF)
 	{
 		switch(c)
 		{
@@ -736,7 +801,120 @@ int main(int argc, char **argv)
 			case 'y':
 				opt_skip_tty = 1;
 				break;
+			case 'm':
+				i=0;
+				pch = strtok (optarg,",");
+				while (pch != NULL)
+				{
+					opt_color_points[i] = atof(pch);
+					// bound value
+					if (opt_color_points[i]<0.0)
+						opt_color_points[i] = 0.0;
+					if (opt_color_points[i]>1.0)
+						opt_color_points[i] = 1.0;
+					i++;
+					pch = strtok (NULL, ",");
+					if (i>=12) 
+						break;
+				}
+				/* 
+				printf("%d points:\n",i);
+				for (j=0; j<i; j++) {
+					printf("  %d: %f\n", j, opt_color_points[j]);
+				}
+				*/
+				switch (i) {
+					case 1:
+						// single point: uniform value scaling
+						color_bezier_points[0] = color_bezier_points[4] = color_bezier_points[8]  = 0.0;
+						color_bezier_points[3] = color_bezier_points[7] = color_bezier_points[11] = opt_color_points[0];
+						color_bezier_points[1] = color_bezier_points[5] = color_bezier_points[9]  = opt_color_points[0] / 3.0;
+						color_bezier_points[2] = color_bezier_points[6] = color_bezier_points[10] = color_bezier_points[1] * 2.0;
+						opt_color_remap = 1;
+						break;
+					case 2:
+						// two points: uniform slope + offset
+						color_bezier_points[0] = color_bezier_points[4] = color_bezier_points[8]  = opt_color_points[0];
+						color_bezier_points[3] = color_bezier_points[7] = color_bezier_points[11] = opt_color_points[1];
+						slope = (opt_color_points[1] - opt_color_points[0]) / 3.0;
+						color_bezier_points[1] = color_bezier_points[5] = color_bezier_points[9]  = opt_color_points[0] + slope;
+						color_bezier_points[2] = color_bezier_points[6] = color_bezier_points[10] = opt_color_points[0] + slope * 2.0;
+						opt_color_remap = 1;
+						break;
+					case 3:
+						// three points: distinct scaling for each channel
+						color_bezier_points[0]  = 0.0;
+						color_bezier_points[3]  = opt_color_points[0]; 
+						color_bezier_points[1]  = opt_color_points[0] / 3.0; 
+						color_bezier_points[2]  = color_bezier_points[1] * 2.0;
+						color_bezier_points[4]  = 0.0;
+						color_bezier_points[7]  = opt_color_points[1]; 
+						color_bezier_points[5]  = opt_color_points[1] / 3.0; 
+						color_bezier_points[6]  = color_bezier_points[5] * 2.0;
+						color_bezier_points[8]  = 0.0;
+						color_bezier_points[11] = opt_color_points[2]; 
+						color_bezier_points[9]  = opt_color_points[2] / 3.0; 
+						color_bezier_points[10] = color_bezier_points[9] * 2.0;
+						opt_color_remap = 1;
+						break;
+					case 4:
+						// four points: uniform bezier curve for all channels
+						color_bezier_points[0] = color_bezier_points[4] = color_bezier_points[8]  = opt_color_points[0];
+						color_bezier_points[3] = color_bezier_points[7] = color_bezier_points[11] = opt_color_points[1];
+						color_bezier_points[1] = color_bezier_points[5] = color_bezier_points[9]  = opt_color_points[2];
+						color_bezier_points[2] = color_bezier_points[6] = color_bezier_points[10] = opt_color_points[3];
+						opt_color_remap = 1;
+						break;
+					case 6:
+						// six points: slope and offset for each channel
+						color_bezier_points[0]  = opt_color_points[0];
+						color_bezier_points[3]  = opt_color_points[1]; 
+						slope = (opt_color_points[1] - opt_color_points[0]) / 3.0;
+						color_bezier_points[1]  = opt_color_points[0] + slope; 
+						color_bezier_points[2]  = opt_color_points[0] + slope * 2.0;
+						color_bezier_points[4]  = opt_color_points[2];
+						color_bezier_points[7]  = opt_color_points[3]; 
+						slope = (opt_color_points[3] - opt_color_points[2]) / 3.0;
+						color_bezier_points[5]  = opt_color_points[2] + slope; 
+						color_bezier_points[6]  = opt_color_points[2] + slope * 2.0;
+						color_bezier_points[8]  = opt_color_points[4];
+						color_bezier_points[11] = opt_color_points[5]; 
+						slope = (opt_color_points[5] - opt_color_points[4]) / 3.0;
+						color_bezier_points[9]  = opt_color_points[4] + slope; 
+						color_bezier_points[10] = opt_color_points[4] + slope * 2.0;
+						opt_color_remap = 1;
+						break;
+					case 12:
+						// 12 points: full bezier parameters
+						color_bezier_points[0]  = opt_color_points[0];
+						color_bezier_points[1]  = opt_color_points[1];
+						color_bezier_points[2]  = opt_color_points[2];
+						color_bezier_points[3]  = opt_color_points[3];
+						color_bezier_points[4]  = opt_color_points[4];
+						color_bezier_points[5]  = opt_color_points[5];
+						color_bezier_points[6]  = opt_color_points[6];
+						color_bezier_points[7]  = opt_color_points[7];
+						color_bezier_points[8]  = opt_color_points[8];
+						color_bezier_points[9]  = opt_color_points[9];
+						color_bezier_points[10] = opt_color_points[10];
+						color_bezier_points[11] = opt_color_points[11];
+						opt_color_remap = 1;
+						break;
+					default:
+						printf("Please specify either 1, 2, 3, 4, 6 or 12 points between 0.0 and 1.0 for color correction:\n");
+						printf("   1 point:  uniform contrast adjustment for all channels\n");
+						printf("   2 points: uniform contrast and brightness adjustment for all channels\n");
+						printf("   3 points: individual contrast adjustment for each channel\n");
+						printf("   4 points: uniform bezier curve adjustment for all channels\n");
+						printf("   6 points: individual contrast and brightness adjustment for each channel\n");
+						printf("  12 points: individual bezier curve adjustment for each channel\n");
+						break;
+				}
 		}
+	}
+
+	if (opt_color_remap) {
+		build_colormap();
 	}
 
 	if(!argv[optind])
