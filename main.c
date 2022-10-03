@@ -733,7 +733,7 @@ int main(int argc, char **argv)
 		{"smartfit",     required_argument,  0, 'x'},
 		{"ignore-aspect", no_argument,  0, 'r'},
 		{"orientation",		  required_argument,  0, 'o'},
-		{"skiptty",		  required_argument,  0, 'y'},
+		{"skiptty",		  no_argument,  0, 'y'},
 		{"imagename",     required_argument, 0, 'n'},
 		{"color",         required_argument, 0, 'm'},
 		{0, 0, 0, 0}
