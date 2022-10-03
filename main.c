@@ -401,8 +401,9 @@ identified:
 			}
 
 			if (opt_color_remap) {
+				int cnt;
 				unsigned char *px = i.rgb;
-				for (int cnt=0; cnt<i.width * i.height; cnt++) {
+				for (cnt=0; cnt<i.width * i.height; cnt++) {
 					*px     = color_map[*px];
 					*(px+1) = color_map[256 + *(px+1)];
 					*(px+2) = color_map[512 + *(px+2)];
@@ -639,7 +640,8 @@ void build_colormap() {
 	float b1 = color_bezier_points[9];
 	float b2 = color_bezier_points[10];
 	float b3 = color_bezier_points[11];
-	for (int x = 0; x<256; x++) {
+	int x;
+	for (x = 0; x<256; x++) {
 		float t = x / 255.0;
 		float t1 = 1.0-t;
 		float t2 = t*t;
